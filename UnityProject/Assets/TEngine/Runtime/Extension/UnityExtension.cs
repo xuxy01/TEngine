@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngineInternal;
 
@@ -132,7 +133,9 @@ namespace TEngine
         /// <param name="spriteName">图片名称。</param>
         /// <param name="isSetNativeSize">是否使用原生分辨率。</param>
         /// <param name="isAsync">是否使用异步加载。</param>
-        public static void SetSprite(this UnityEngine.UI.Image image, string spriteName, bool isSetNativeSize = false, bool isAsync = false)
+        /// <param name="customPackageName">指定资源包的名称。不传使用默认资源包</param>
+        public static void SetSprite(this UnityEngine.UI.Image image, string spriteName, bool isSetNativeSize = false,
+            bool isAsync = false, string customPackageName = "")
         {
             if (image == null)
             {
@@ -147,11 +150,14 @@ namespace TEngine
             {
                 if (!isAsync)
                 {
-                    image.sprite = GameModule.Resource.LoadAsset<Sprite>(spriteName);
+                    var operation = GameModule.Resource.LoadAssetGetOperation<Sprite>(spriteName, customPackageName: customPackageName);
+                    image.sprite = operation.AssetObject as Sprite;
                     if (isSetNativeSize)
                     {
                         image.SetNativeSize();
                     }
+
+                    image.gameObject.GetOrAddComponent<AssetReference>().Reference(operation, spriteName);
                 }
                 else
                 {
@@ -159,7 +165,9 @@ namespace TEngine
                     {
                         if (image == null)
                         {
-                            goto Dispose;
+                            operation.Dispose();
+                            operation = null;
+                            return;
                         }
 
                         image.sprite = operation.AssetObject as Sprite;
@@ -168,9 +176,8 @@ namespace TEngine
                             image.SetNativeSize();
                         }
 
-                        Dispose:
-                        operation.Dispose();
-                    });
+                        image.gameObject.GetOrAddComponent<AssetReference>().Reference(operation, spriteName);
+                    }, customPackageName: customPackageName);
                 }
             }
         }
@@ -181,7 +188,9 @@ namespace TEngine
         /// <param name="spriteRenderer">Image组件。</param>
         /// <param name="spriteName">图片名称。</param>
         /// <param name="isAsync">是否使用异步加载。</param>
-        public static void SetSprite(this SpriteRenderer spriteRenderer, string spriteName, bool isAsync = false)
+        /// <param name="customPackageName">指定资源包的名称。不传使用默认资源包</param>
+        public static void SetSprite(this SpriteRenderer spriteRenderer, string spriteName, bool isAsync = false,
+            string customPackageName = "")
         {
             if (spriteRenderer == null)
             {
@@ -196,7 +205,10 @@ namespace TEngine
             {
                 if (!isAsync)
                 {
-                    spriteRenderer.sprite = GameModule.Resource.LoadAsset<Sprite>(spriteName);
+                    var operation = GameModule.Resource.LoadAssetGetOperation<Sprite>(spriteName, customPackageName: customPackageName);
+                    spriteRenderer.sprite = operation.AssetObject as Sprite;
+
+                    spriteRenderer.gameObject.GetOrAddComponent<AssetReference>().Reference(operation, spriteName);
                 }
                 else
                 {
@@ -204,18 +216,18 @@ namespace TEngine
                     {
                         if (spriteRenderer == null)
                         {
-                            goto Dispose;
+                            operation.Dispose();
+                            operation = null;
+                            return;
                         }
 
                         spriteRenderer.sprite = operation.AssetObject as Sprite;
-
-                        Dispose:
-                        operation.Dispose();
-                    });
+                        spriteRenderer.gameObject.GetOrAddComponent<AssetReference>().Reference(operation, spriteName);
+                    }, customPackageName: customPackageName);
                 }
             }
         }
-        
+
         /// <summary>
         /// 查找子节点。
         /// </summary>
@@ -227,7 +239,7 @@ namespace TEngine
             var findTrans = transform.Find(path);
             return findTrans != null ? findTrans : null;
         }
-        
+
         /// <summary>
         /// 根据名字找到子节点，主要用于dummy接口。
         /// </summary>
@@ -258,7 +270,7 @@ namespace TEngine
 
             return null;
         }
-        
+
         [TypeInferenceRule(TypeInferenceRules.TypeReferencedByFirstArgument)]
         public static Component FindChildComponent(this Type type, Transform transform, string path)
         {
@@ -270,7 +282,7 @@ namespace TEngine
 
             return null;
         }
-        
+
         public static T FindChildComponent<T>(this Transform transform, string path) where T : Component
         {
             var findTrans = transform.Find(path);
@@ -280,6 +292,73 @@ namespace TEngine
             }
 
             return null;
+        }
+
+        public static AssetReference GetAssetReference(this GameObject gameObject)
+        {
+            if (gameObject == null)
+            {
+                return null;
+            }
+
+            return gameObject.GetComponent<AssetReference>();
+        }
+
+        /// <summary>
+        /// 加载资源并绑定资源引用到GameObject上。
+        /// </summary>
+        /// <param name="gameObject">GameObject。</param>
+        /// <param name="location">资源定位地址。</param>
+        /// <param name="callBack">加载完成回调。</param>
+        /// <param name="customPackageName">自定义包。</param>
+        /// <typeparam name="T">资源实例类型。</typeparam>
+        /// <returns>资源实例。</returns>
+        public static T LoadAsset<T>(this GameObject gameObject, string location, Action<T> callBack = null,
+            string customPackageName = "") where T : UnityEngine.Object
+        {
+            if (gameObject == null)
+            {
+                return null;
+            }
+
+            var operation = GameModule.Resource.LoadAssetGetOperation<T>(location, customPackageName: customPackageName);
+            var asset = operation.AssetObject as T;
+            gameObject.GetOrAddComponent<AssetReference>().Reference(operation, location);
+            callBack?.Invoke(asset);
+            return asset;
+        }
+
+        /// <summary>
+        /// 异步加载资源并绑定资源引用到GameObject上。
+        /// </summary>
+        /// <param name="gameObject">GameObject。</param>
+        /// <param name="location">资源定位地址。</param>
+        /// <param name="callBack">加载完成回调。</param>
+        /// <param name="customPackageName">自定义包。</param>
+        /// <typeparam name="T">资源实例类型。</typeparam>
+        /// <returns>资源实例。</returns>
+        public static async UniTask<T> LoadAssetAsync<T>(this GameObject gameObject, string location, Action<T> callBack = null,
+            string customPackageName = "") where T : UnityEngine.Object
+        {
+            if (gameObject == null)
+            {
+                return null;
+            }
+
+            var operation = GameModule.Resource.LoadAssetAsyncHandle<T>(location, customPackageName: customPackageName);
+
+            bool cancelOrFailed = await operation.ToUniTask().AttachExternalCancellation(gameObject.GetCancellationTokenOnDestroy())
+                .SuppressCancellationThrow();
+
+            if (cancelOrFailed)
+            {
+                return null;
+            }
+
+            gameObject.GetOrAddComponent<AssetReference>().Reference(operation, location);
+            var asset = operation.AssetObject as T;
+            callBack?.Invoke(asset);
+            return asset;
         }
     }
 }

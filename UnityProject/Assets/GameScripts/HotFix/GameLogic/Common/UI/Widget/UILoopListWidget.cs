@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using TEngine;
 using UnityEngine;
 
 namespace GameLogic
@@ -16,8 +17,9 @@ namespace GameLogic
 
         /// <summary>
         /// Item字典
+        /// <remarks>Key => GameObjectHashCode | Value => TItem.</remarks>
         /// </summary>
-        private Dictionary<int, TItem> m_itemCache = new Dictionary<int, TItem>();
+        private GameFrameworkDictionary<int, TItem> m_itemCache = new GameFrameworkDictionary<int, TItem>();
 
         /// <summary>
         /// 计算偏差后的ItemList
@@ -63,7 +65,7 @@ namespace GameLogic
             base.AdjustItemNum(n, datas, funcItem);
             m_tpFuncItem = funcItem;
             LoopRectView.SetListItemCount(n);
-            LoopRectView.RefreshAllShownItem();
+            // LoopRectView.RefreshAllShownItem();
             m_tpFuncItem = null;
         }
 
@@ -145,11 +147,11 @@ namespace GameLogic
        /// <summary>
        /// 获取item
        /// </summary>
-       /// <param name="i"></param>
+       /// <param name="index"></param>
        /// <returns></returns>
-        public override TItem GetItem(int i)
+        public override TItem GetItem(int index)
         {
-            return i >= 0 && i < m_items.Count ? m_items[i] : null;
+            return index >= 0 && index < m_itemCache.Count ? m_itemCache.GetValueByIndex(index) : null;
         }
 
        /// <summary>
@@ -161,7 +163,7 @@ namespace GameLogic
             m_items.Clear();
             for (int i = 0; i < m_itemCache.Count; i++)
             {
-                m_items.Add(m_itemCache[i]);
+                m_items.Add(m_itemCache.GetValueByIndex(i));
             }
             return m_items;
         }
@@ -173,6 +175,16 @@ namespace GameLogic
         public int GetItemStartIndex()
         {
             return LoopRectView.GetItemStartIndex();
+        }
+        
+        /// <summary>
+        /// 获取Item。
+        /// </summary>
+        /// <param name="index">索引。</param>
+        /// <returns>TItem。</returns>
+        public TItem GetItemByIndex(int index)
+        {
+            return m_itemCache.GetValueByIndex(index);
         }
     }
 }

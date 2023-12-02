@@ -77,16 +77,17 @@ namespace TEngine
         public static void Shutdown(ShutdownType shutdownType)
         {
             Log.Info("Shutdown Game Framework ({0})...", shutdownType);
-            Utility.Unity.Release();
+            Utility.Unity.Shutdown();
             RootModule rootModule = GetModule<RootModule>();
             if (rootModule != null)
             {
                 rootModule.Shutdown();
                 rootModule = null;
             }
-
             _modules.Clear();
 
+            GameModule.Shutdown(shutdownType);
+            
             if (shutdownType == ShutdownType.None)
             {
                 return;

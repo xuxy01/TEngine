@@ -68,6 +68,25 @@ namespace TEngine
 
             m_InstanceRoot.gameObject.layer = LayerMask.NameToLayer("UI");
             UIRootStatic = m_InstanceRoot;
+            
+            switch (GameModule.Debugger.ActiveWindowType)
+            {
+                case DebuggerActiveWindowType.AlwaysOpen:
+                    m_enableErrorLog = true;
+                    break;
+
+                case DebuggerActiveWindowType.OnlyOpenWhenDevelopment:
+                    m_enableErrorLog = Debug.isDebugBuild;
+                    break;
+
+                case DebuggerActiveWindowType.OnlyOpenInEditor:
+                    m_enableErrorLog = Application.isEditor;
+                    break;
+
+                default:
+                    m_enableErrorLog = false;
+                    break;
+            }
             if (m_enableErrorLog)
             {
                 _errorLogger = new ErrorLogger();
@@ -76,7 +95,16 @@ namespace TEngine
 
         private void OnDestroy()
         {
+            if (_errorLogger != null)
+            {
+                _errorLogger.Dispose();
+                _errorLogger = null;
+            }
             CloseAll();
+            if (m_InstanceRoot != null && m_InstanceRoot.parent != null)
+            {
+                Destroy(m_InstanceRoot.parent.gameObject);
+            }
         }
 
         #region 设置安全区域
@@ -400,7 +428,7 @@ namespace TEngine
                 throw new Exception($"Window {type.FullName} not found {nameof(WindowAttribute)} attribute.");
 
             string assetName = string.IsNullOrEmpty(attribute.Location) ? type.Name : attribute.Location;
-            window.Init(type.FullName, attribute.WindowLayer, attribute.FullScreen, assetName, attribute.FromResources);
+            window.Init(type.FullName, attribute.WindowLayer, attribute.FullScreen, assetName, attribute.FromResources, attribute.NeedCache);
             return window;
         }
 

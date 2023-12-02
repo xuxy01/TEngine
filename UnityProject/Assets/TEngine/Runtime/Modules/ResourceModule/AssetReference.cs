@@ -14,6 +14,7 @@ namespace TEngine
     {
         private int _instanceID = 0;
         private string _assetLocation;
+        private string _packageName;
         private AssetGroup _assetGroup;
         private AssetOperationHandle _operationHandle;
 
@@ -33,6 +34,11 @@ namespace TEngine
         public string AssetLocation => _assetLocation;
 
         /// <summary>
+        /// 资源包名称。
+        /// </summary>
+        public string PackageName => _packageName;
+
+        /// <summary>
         /// 脏初始化资源分组。
         /// </summary>
         public void DirtyInitAssetGroup()
@@ -49,10 +55,19 @@ namespace TEngine
         /// <param name="operation">资源操作句柄。</param>
         /// <param name="assetLocation">资源定位地址。</param>
         /// <param name="parent">父级资源引用。(NullAble)</param>
-        public void Bind(AssetOperationHandle operation, string assetLocation, AssetReference parent = null)
+        /// <param name="packageName">指定资源包的名称。不传使用默认资源包</param>
+        public void Bind(AssetOperationHandle operation, string assetLocation, AssetReference parent = null,
+            string packageName = "")
         {
+            if (_operationHandle != null)
+            {
+                Log.Warning($"rebind AssetReference gameObject.name:{gameObject.name} assetLocation:{assetLocation}");
+                _operationHandle.Dispose();
+                _operationHandle = null;
+            }
             _operationHandle = operation;
             this._assetLocation = assetLocation;
+            this._packageName = packageName;
             _instanceID = gameObject.GetInstanceID();
             if (parent != null)
             {
@@ -62,7 +77,7 @@ namespace TEngine
 
         private void OnDestroy()
         {
-            if (_operationHandle != null)
+            if (_operationHandle is { IsValid: true })
             {
                 _operationHandle.Release();
                 _operationHandle = null;
@@ -183,7 +198,8 @@ namespace TEngine
         /// <param name="assetOperationHandle">资源操作句柄。</param>
         /// <returns>资源实例。</returns>
         // ReSharper disable once ParameterHidesMember
-        public T LoadAsset<T>(string assetName, Transform parent, out AssetOperationHandle assetOperationHandle) where T : Object
+        public T LoadAsset<T>(string assetName, Transform parent, out AssetOperationHandle assetOperationHandle)
+            where T : Object
         {
             DirtyInitAssetGroup();
             return _assetGroup.LoadAsset<T>(assetName, parent, out assetOperationHandle);
@@ -195,7 +211,7 @@ namespace TEngine
         /// <param name="assetName">要加载的实例名称。</param>
         /// <param name="cancellationToken">取消操作Token。</param>
         /// <returns>资源实实例。</returns>
-        public async UniTask<T> LoadAssetAsync<T>(string assetName, CancellationToken cancellationToken)
+        public async UniTask<T> LoadAssetAsync<T>(string assetName, CancellationToken cancellationToken = default)
             where T : Object
         {
             DirtyInitAssetGroup();
@@ -208,7 +224,8 @@ namespace TEngine
         /// <param name="assetName">要加载的游戏物体名称。</param>
         /// <param name="cancellationToken">取消操作Token。</param>
         /// <returns>异步游戏物体实例。</returns>
-        public async UniTask<GameObject> LoadGameObjectAsync(string assetName, CancellationToken cancellationToken)
+        public async UniTask<GameObject> LoadGameObjectAsync(string assetName,
+            CancellationToken cancellationToken = default)
         {
             DirtyInitAssetGroup();
             return await _assetGroup.LoadGameObjectAsync(assetName, cancellationToken);
@@ -221,9 +238,11 @@ namespace TEngine
         /// <param name="handle">资源句柄。</param>
         /// <param name="location">资源定位地址。</param>
         /// <param name="parent">父级引用。</param>
+        /// <param name="packageName">指定资源包的名称。不传使用默认资源包</param>
         /// <returns>资源引用组件。</returns>
         /// <exception cref="GameFrameworkException">捕获异常。</exception>
-        public static AssetReference BindAssetReference(GameObject go, AssetOperationHandle handle, string location = "", AssetReference parent = null)
+        public static AssetReference BindAssetReference(GameObject go, AssetOperationHandle handle,
+            string location = "", AssetReference parent = null, string packageName = "")
         {
             if (go == null)
             {
@@ -237,7 +256,7 @@ namespace TEngine
 
             var ret = go.GetOrAddComponent<AssetReference>();
 
-            ret.Bind(operation: handle, assetLocation: location, parent: parent);
+            ret.Bind(operation: handle, assetLocation: location, parent: parent, packageName: packageName);
 
             return ret;
         }
@@ -248,9 +267,11 @@ namespace TEngine
         /// <param name="go">游戏物体实例。</param>
         /// <param name="location">资源定位地址。</param>
         /// <param name="parent">父级引用。</param>
+        /// <param name="packageName">指定资源包的名称。不传使用默认资源包</param>
         /// <returns>资源引用组件。</returns>
         /// <exception cref="GameFrameworkException">捕获异常。</exception>
-        public static AssetReference BindAssetReference(GameObject go, string location = "", AssetReference parent = null)
+        public static AssetReference BindAssetReference(GameObject go, string location = "",
+            AssetReference parent = null, string packageName = "")
         {
             if (go == null)
             {
@@ -259,7 +280,7 @@ namespace TEngine
 
             var ret = go.GetOrAddComponent<AssetReference>();
 
-            ret.Bind(operation: null, assetLocation: location, parent: parent);
+            ret.Bind(operation: null, assetLocation: location, parent: parent, packageName: packageName);
 
             return ret;
         }

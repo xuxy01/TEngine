@@ -225,15 +225,6 @@ namespace TEngine
             }
             #endregion
             
-            /// <summary>
-            /// 释放Behaviour生命周期。
-            /// </summary>
-            public static void Release()
-            {
-                _MakeEntity();
-                _behaviour.Release();
-            }
-
             private static void _MakeEntity()
             {
                 if (_entity != null)
@@ -241,21 +232,28 @@ namespace TEngine
                     return;
                 }
 
-                _entity = new GameObject("__MonoUtility__")
-                {
-                    hideFlags = HideFlags.HideAndDontSave
-                };
+                _entity = new GameObject("[Unity.Utility]");
                 _entity.SetActive(true);
-
-#if UNITY_EDITOR
-                if (Application.isPlaying)
-#endif
-                {
-                    Object.DontDestroyOnLoad(_entity);
-                }
+                _entity.transform.SetParent(GameModule.Base.transform);
 
                 UnityEngine.Assertions.Assert.IsFalse(_behaviour);
                 _behaviour = _entity.AddComponent<MainBehaviour>();
+            }
+
+            /// <summary>
+            /// 释放Behaviour生命周期。
+            /// </summary>
+            public static void Shutdown()
+            {
+                if (_behaviour != null)
+                {
+                    _behaviour.Release();
+                }
+                if (_entity != null)
+                {
+                    Object.Destroy(_entity);
+                }
+                _entity = null;
             }
 
             private class MainBehaviour : MonoBehaviour
