@@ -109,6 +109,10 @@ namespace TEngine
         /// </summary>
         private readonly Dictionary<string, AssetInfo> _assetInfoMap = new Dictionary<string, AssetInfo>();
 
+        /// <summary>
+        /// 正在加载的资源列表。
+        /// </summary>
+        private readonly HashSet<string> _assetLoadingList = new HashSet<string>();
         #endregion
 
         /// <summary>
@@ -133,6 +137,8 @@ namespace TEngine
                 YooAssets.SetDefaultPackage(defaultPackage);
                 DefaultPackage = defaultPackage;
             }
+
+            CancellationToken = InstanceRoot.gameObject.GetCancellationTokenOnDestroy();
 
             IObjectPoolManager objectPoolManager = ModuleImpSystem.GetModule<IObjectPoolManager>();
             SetObjectPoolManager(objectPoolManager);
@@ -253,7 +259,10 @@ namespace TEngine
 
         internal override void Shutdown()
         {
+            PackageMap.Clear();
             m_AssetPool = null;
+            _assetLoadingList.Clear();
+            _assetInfoMap.Clear();
 #if !UNITY_WEBGL
             YooAssets.Destroy();
 #endif
@@ -523,7 +532,7 @@ namespace TEngine
             return ret;
         }
 
-        public GameObject LoadGameObject(string location, string packageName = "", Transform parent = null)
+        public GameObject LoadGameObject(string location, Transform parent = null, string packageName = "")
         {
             if (string.IsNullOrEmpty(location))
             {
@@ -554,7 +563,7 @@ namespace TEngine
         /// <param name="callback">回调函数。</param>
         /// <param name="packageName">指定资源包的名称。不传使用默认资源包</param>
         /// <typeparam name="T">要加载资源的类型。</typeparam>
-        public void LoadAsset<T>(string location, Action<T> callback, string packageName = "") where T : UnityEngine.Object
+        public async UniTaskVoid LoadAsset<T>(string location, Action<T> callback, string packageName = "") where T : UnityEngine.Object
         {
             if (string.IsNullOrEmpty(location))
             {
@@ -568,17 +577,25 @@ namespace TEngine
             }
             
             string assetObjectKey = GetCacheKey(location, packageName);
+            
+            await TryWaitingLoading(assetObjectKey);
+
             AssetObject assetObject = m_AssetPool.Spawn(assetObjectKey);
             if (assetObject != null)
             {
+                await UniTask.Yield();
                 callback?.Invoke(assetObject.Target as T);
                 return;
             }
+            
+            _assetLoadingList.Add(assetObjectKey);
             
             AssetHandle handle = GetHandleAsync<T>(location, packageName: packageName);
 
             handle.Completed += assetHandle =>
             {
+                _assetLoadingList.Remove(assetObjectKey);
+                
                 if (assetHandle.AssetObject != null)
                 {
                     assetObject = AssetObject.Create(assetObjectKey, handle.AssetObject, handle,this);
@@ -611,7 +628,7 @@ namespace TEngine
             throw new NotImplementedException();
         }
 
-        public  async UniTask<T> LoadAssetAsync<T>(string location, CancellationToken cancellationToken = default, string packageName = "") where T : UnityEngine.Object
+        public async UniTask<T> LoadAssetAsync<T>(string location, CancellationToken cancellationToken = default, string packageName = "") where T : UnityEngine.Object
         {
             if (string.IsNullOrEmpty(location))
             {
@@ -619,11 +636,17 @@ namespace TEngine
             }
             
             string assetObjectKey = GetCacheKey(location, packageName);
+
+            await TryWaitingLoading(assetObjectKey);
+            
             AssetObject assetObject = m_AssetPool.Spawn(assetObjectKey);
             if (assetObject != null)
             {
+                await UniTask.Yield();
                 return assetObject.Target as T;
             }
+            
+            _assetLoadingList.Add(assetObjectKey);
  
             AssetHandle handle = GetHandleAsync<T>(location, packageName: packageName);
 
@@ -636,12 +659,13 @@ namespace TEngine
             
             assetObject = AssetObject.Create(assetObjectKey, handle.AssetObject, handle,this);
             m_AssetPool.Register(assetObject, true);
+
+            _assetLoadingList.Remove(assetObjectKey);
             
             return handle.AssetObject as T;
         }
 
-        public async UniTask<GameObject> LoadGameObjectAsync(string location, CancellationToken cancellationToken = default, string packageName = "",
-            Transform parent = null)
+        public async UniTask<GameObject> LoadGameObjectAsync(string location, Transform parent = null, CancellationToken cancellationToken = default, string packageName = "")
         {
             if (string.IsNullOrEmpty(location))
             {
@@ -649,12 +673,18 @@ namespace TEngine
             }
             
             string assetObjectKey = GetCacheKey(location, packageName);
+            
+            await TryWaitingLoading(assetObjectKey);
+            
             AssetObject assetObject = m_AssetPool.Spawn(assetObjectKey);
             if (assetObject != null)
             {
+                await UniTask.Yield();
                 return AssetsReference.Instantiate(assetObject.Target as GameObject, parent, this).gameObject;
             }
             
+            _assetLoadingList.Add(assetObjectKey);
+
             AssetHandle handle = GetHandleAsync<GameObject>(location, packageName: packageName);
 
             bool cancelOrFailed = await handle.ToUniTask().AttachExternalCancellation(cancellationToken).SuppressCancellationThrow();
@@ -669,6 +699,8 @@ namespace TEngine
             assetObject = AssetObject.Create(assetObjectKey, handle.AssetObject, handle,this);
             m_AssetPool.Register(assetObject, true);
 
+            _assetLoadingList.Remove(assetObjectKey);
+            
             return gameObject;
         }
 
@@ -696,12 +728,20 @@ namespace TEngine
             }
             
             string assetObjectKey = GetCacheKey(location, packageName);
+            
+            await TryWaitingLoading(assetObjectKey);
+            
+            float duration = Time.time;
+            
             AssetObject assetObject = m_AssetPool.Spawn(assetObjectKey);
             if (assetObject != null)
             {
-                loadAssetCallbacks.LoadAssetSuccessCallback(location, assetObject.Target, 0, userData);
+                await UniTask.Yield();
+                loadAssetCallbacks.LoadAssetSuccessCallback(location, assetObject.Target, Time.time - duration, userData);
                 return;
             }
+            
+            _assetLoadingList.Add(assetObjectKey);
             
             AssetInfo assetInfo = GetAssetInfo(location, packageName);
 
@@ -716,8 +756,6 @@ namespace TEngine
 
                 throw new GameFrameworkException(errorMessage);
             }
-            
-            float duration = Time.time;
 
             AssetHandle handle = GetHandleAsync(location, assetType, packageName: packageName);
 
@@ -730,6 +768,8 @@ namespace TEngine
 
             if (handle.AssetObject == null || handle.Status == EOperationStatus.Failed)
             {
+                _assetLoadingList.Remove(assetObjectKey);
+                
                 string errorMessage = Utility.Text.Format("Can not load asset '{0}'.", location);
                 if (loadAssetCallbacks.LoadAssetFailureCallback != null)
                 {
@@ -743,6 +783,8 @@ namespace TEngine
             {
                 assetObject = AssetObject.Create(assetObjectKey, handle.AssetObject, handle,this);
                 m_AssetPool.Register(assetObject, true);
+                
+                _assetLoadingList.Remove(assetObjectKey);
                 
                 if (loadAssetCallbacks.LoadAssetSuccessCallback != null)
                 {
@@ -774,12 +816,20 @@ namespace TEngine
             }
             
             string assetObjectKey = GetCacheKey(location, packageName);
+            
+            await TryWaitingLoading(assetObjectKey);
+            
+            float duration = Time.time;
+            
             AssetObject assetObject = m_AssetPool.Spawn(assetObjectKey);
             if (assetObject != null)
             {
-                loadAssetCallbacks.LoadAssetSuccessCallback(location, assetObject.Target, 0, userData);
+                await UniTask.Yield();
+                loadAssetCallbacks.LoadAssetSuccessCallback(location, assetObject.Target, Time.time - duration, userData);
                 return;
             }
+            
+            _assetLoadingList.Add(assetObjectKey);
 
             AssetInfo assetInfo = GetAssetInfo(location, packageName);
 
@@ -795,8 +845,6 @@ namespace TEngine
                 throw new GameFrameworkException(errorMessage);
             }
             
-            float duration = Time.time;
-
             AssetHandle handle = GetHandleAsync(location, assetInfo.AssetType, packageName: packageName);
 
             if (loadAssetCallbacks.LoadAssetUpdateCallback != null)
@@ -808,6 +856,8 @@ namespace TEngine
 
             if (handle.AssetObject == null || handle.Status == EOperationStatus.Failed)
             {
+                _assetLoadingList.Remove(assetObjectKey);
+                
                 string errorMessage = Utility.Text.Format("Can not load asset '{0}'.", location);
                 if (loadAssetCallbacks.LoadAssetFailureCallback != null)
                 {
@@ -821,6 +871,8 @@ namespace TEngine
             {
                 assetObject = AssetObject.Create(assetObjectKey, handle.AssetObject, handle,this);
                 m_AssetPool.Register(assetObject, true);
+                
+                _assetLoadingList.Remove(assetObjectKey);
 
                 if (loadAssetCallbacks.LoadAssetSuccessCallback != null)
                 {
@@ -848,7 +900,35 @@ namespace TEngine
                 }
             }
         }
-
+        
+        private readonly TimeoutController _timeoutController = new TimeoutController();
+        
+        private async UniTask TryWaitingLoading(string assetObjectKey)
+        {
+            if (_assetLoadingList.Contains(assetObjectKey))
+            {
+                try
+                {
+                    await UniTask.WaitUntil(
+                        () => !_assetLoadingList.Contains(assetObjectKey), 
+                        cancellationToken:CancellationToken)
+#if UNITY_EDITOR
+                        .AttachExternalCancellation(_timeoutController.Timeout(TimeSpan.FromSeconds(60)));
+                    _timeoutController.Reset();
+#else
+                    ;
+#endif
+                
+                }
+                catch (OperationCanceledException ex)
+                {
+                    if (_timeoutController.IsTimeout())
+                    {
+                        Log.Error($"LoadAssetAsync Waiting {assetObjectKey} timeout. reason:{ex.Message}");
+                    }
+                }
+            }
+        }
         #endregion
 
         #region 资源回收
